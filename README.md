@@ -1,229 +1,132 @@
-<div align="center">
-  <img src="frontend/public/logo.png" width="180" alt="FlowLens AI Logo" />
+# FlowLens — Operational Bottleneck Detector
+
+FlowLens is a full-stack web app that finds where your process is slowing down —
+which stage, how bad, and why — using simple, explainable statistics (no black-box AI).
+Upload a CSV/Excel file (or pull data straight from Google Sheets), and FlowLens tells
+you the bottleneck stage, flags stuck items, and gives you a plain-English report you
+can download as a PDF.
+
+## Why it's not "just another dashboard app"
+
+- **The math is deliberately simple and auditable.** Stage duration → mean/median/IQR →
+  z-score vs the rest of the pipeline → outlier flag. No ML model, no black box — every
+  number in the report can be explained in one sentence, and you can verify it by hand.
+- **The report reads like an analyst wrote it**, not like a chart dump: it names the
+  worst stage, tells you *why* (capacity constraint vs. inconsistent process vs.
+  frequent exceptions), and gives a recommendation.
+- **Fintech-app-grade frontend** (Paytm/PhonePe-inspired): bold single accent color,
+  big number cards, bottom nav on mobile, rounded everything, zero enterprise-dashboard
+  clutter.
+
+## Stack
+
+| Layer | Tech |
+|---|---|
+| Frontend | React 18 + Vite + TailwindCSS + Recharts |
+| Backend | Node.js + Express |
+| Database | SQLite (file-based, zero setup — `better-sqlite3`) |
+| Auth | Google OAuth 2.0 + email/password, JWT sessions, role-based (admin / user) |
+| File parsing | `xlsx` (Excel), `csv-parse` (CSV) |
+| Sheets integration | Google Sheets API (`googleapis`) |
+| PDF report | `pdfkit` |
+
+## Repo layout
+
+```
+bottleneck-detector/
+├── backend/         # Express API + SQLite + bottleneck engine
+├── frontend/         # React app (Vite)
+├── samples/           # Example CSV to try the app with
+└── DEPLOYMENT.md      # Step-by-step deploy guide (Render/Railway + Vercel/Netlify)
+```
+
+## Quick start (local)
+
+### 1. Backend
+```bash
+cd backend
+cp .env.example .env      # fill in JWT_SECRET, Google OAuth keys (optional to start)
+npm install
+npm run dev                # http://localhost:5000
+```
+
+### 2. Frontend
+```bash
+cd frontend
+cp .env.example .env       # VITE_API_URL=http://localhost:5000
+npm install
+npm run dev                 # http://localhost:5173
+```
+
+Open http://localhost:5173, register a normal account (email/password works with no
+Google setup needed), and upload `samples/sample_process_data.csv` to see a report.
+
+The **first user who registers is automatically made an admin.** Everyone after that is
+a normal user. Admins can see all datasets uploaded by everyone; normal users only see
+their own.
+
+## How the bottleneck logic works (in plain English)
+
+Your data has, for each item/order/ticket that moved through your process, a row per
+stage with an entry time and exit time. FlowLens:
+
+1. Computes **duration = exit − entry** for every (item, stage) pair.
+2. Groups durations **by stage** and computes mean, median, std-dev, and IQR (Q1/Q3).
+3. Compares each stage's average duration to the average across *all* stages using a
+   **z-score** — a stage is flagged as a bottleneck if it's meaningfully slower than
+   the rest of the pipeline (default threshold: 1.0 standard deviation above the mean,
+   adjustable in Settings).
+4. Within each stage, any individual item whose duration is above **Q3 + 1.5×IQR** is
+   flagged as a **stuck/outlier item** — the same rule box plots use.
+5. A rule-based (not AI) classifier looks at each bottleneck stage's mean and variance
+   to suggest *why*:
+   - High mean, low variance → **capacity constraint** (the stage is just slow for
+     everyone — add resources/parallelize).
+   - High mean, high variance → **inconsistent process** (some cases fly through,
+     others get stuck — look for manual steps/approvals/exceptions).
+   - Many outliers, otherwise normal mean → **exception handling problem** (edge cases
+     are what's costing you time, not the everyday case).
+
+This logic lives in one file, `backend/src/services/bottleneckEngine.js`, so it's easy
+to read, tweak, or extend.
+
+## Data format expected
+
+Long format, one row per (item, stage):
+
+| item_id | stage | entry_time | exit_time |
+|---|---|---|---|
+| ORD-1001 | Order Received | 2026-01-05 09:00 | 2026-01-05 09:20 |
+| ORD-1001 | QC Check | 2026-01-05 09:20 | 2026-01-05 11:45 |
+| ORD-1001 | Packing | 2026-01-05 11:45 | 2026-01-05 12:00 |
 
-# FLOW_LENS_AI
+Column names are matched flexibly (case-insensitive, ignores spaces/underscores) —
+`Item`, `ItemID`, `Order Number`... all map to `item_id`, and similarly for
+`stage`/`step`/`phase`, `entry_time`/`start`/`in`, `exit_time`/`end`/`out`.
 
-### **See the Flow. Solve the Delay.**
+## Google Sheets & Google Sign-In
 
-### **The AI-Powered Operational Intelligence Platform**
+See `DEPLOYMENT.md` for creating a Google Cloud OAuth Client ID (needed for both
+"Sign in with Google" and reading Sheets on the user's behalf). The app runs fine
+without it — email/password login and CSV/XLSX upload work with zero Google setup.
 
-[![Built with React](https://img.shields.io/badge/Built_with-React_19-61DAFB?style=for-the-badge&logo=react)](https://react.dev/)
-[![Powered by Vite](https://img.shields.io/badge/Powered_by-Vite_7-646CFF?style=for-the-badge&logo=vite)](https://vitejs.dev/)
-[![Backend FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
-[![Database Supabase](https://img.shields.io/badge/Database-Supabase-3ECF8E?style=for-the-badge&logo=supabase)](https://supabase.com/)
-[![AI Gemini](https://img.shields.io/badge/AI_Engine-Gemini_2.5_Flash-4285F4?style=for-the-badge&logo=google)](https://ai.google.dev/)
-[![Deployment Vercel](https://img.shields.io/badge/Deployment-Vercel-000000?style=for-the-badge&logo=vercel)](https://vercel.com/)
+## Using with Google Antigravity / any AI coding IDE
 
-*FlowLens AI doesn't just show workflow metrics—it discovers hidden operational bottlenecks, explains why they occur, predicts future delays, and recommends the smartest actions to optimize business operations.*
+This is a plain Node + React repo — no special config needed. Point Antigravity (or
+Cursor/Claude Code/etc.) at the root folder; `backend/` and `frontend/` are independent
+npm projects it can run, edit, and redeploy like any other GitHub project. Push this
+whole folder to a new GitHub repo and it just works.
 
-</div>
+## Login / roles
 
----
+- **Google Sign-In** or **email + password**, your choice — both hit the same
+  `users` table.
+- **Roles:** `admin` (first registered user, or promoted via `PATCH /api/auth/role`)
+  and `user`. Admins see every dataset company-wide; normal users see their own only.
+  This satisfies "login as authorised person or normal person."
 
-# 🚀 The Vision
+## Help & Tutorial
 
-Every organization runs hundreds or even thousands of operational workflows every day—from purchase approvals and HR onboarding to customer support, manufacturing, logistics, and software delivery.
-
-Managers often know **that delays exist**, but rarely know:
-
-- Where are delays actually happening?
-- Which department is responsible?
-- Which employee or process causes repeated slowdowns?
-- What operational changes will improve efficiency?
-
-**FlowLens AI** acts as an intelligent Operational Intelligence Platform that transforms workflow data into actionable business insights using Artificial Intelligence.
-
-Instead of static dashboards, FlowLens AI autonomously detects bottlenecks, explains root causes, predicts risks, and recommends improvements.
-
----
-
-# 🧠 The Five-Layer Intelligence Engine
-
-Every workflow analysis passes through five intelligent analysis layers.
-
-| Layer | Focus Area | Capability |
-| :--- | :--- | :--- |
-| 📂 **Workflow Processing** | Data Understanding | Imports workflow datasets, validates records, calculates processing time, waiting time, queue time, and SLA violations. |
-| 🔍 **Operational Bottleneck Detection** | Process Intelligence | Identifies departments, employees, and workflow stages causing maximum delays using statistical analysis and AI-assisted pattern discovery. |
-| 🧠 **AI Root Cause Analysis** | Operational Intelligence | Uses **Google Gemini** to explain why bottlenecks occur, detect workload imbalance, approval dependencies, recurring delays, and hidden operational inefficiencies. |
-| 📈 **Predictive Simulation** | Future Risk Analysis | Simulates operational changes such as additional employees, increased workload, or process restructuring to estimate future efficiency improvements. |
-| 💡 **Optimization Recommendation Engine** | Decision Support | Generates prioritized recommendations, expected impact, and operational strategies to improve workflow efficiency and reduce delays. |
-
----
-
-# ✨ Core Platform Features
-
-## 📂 One-Click Demo Company
-
-Launch FlowLens AI and instantly load a realistic enterprise workflow dataset for demonstration without uploading any files.
-
----
-
-## 📤 Workflow CSV Upload
-
-Upload workflow datasets exported from:
-
-- Microsoft Excel
-- Google Sheets
-- Jira
-- Trello
-- Asana
-
-FlowLens AI automatically processes thousands of workflow records.
-
----
-
-## 🔍 AI Bottleneck Detection
-
-Automatically identifies:
-
-- Slowest department
-- Slowest workflow stage
-- Employee workload imbalance
-- Queue congestion
-- SLA violations
-
----
-
-## 🧠 AI Root Cause Analysis
-
-Gemini explains:
-
-- Why delays occur
-- Hidden workflow patterns
-- Operational risks
-- Repeated bottlenecks
-- Process dependencies
-
-using simple, understandable language.
-
----
-
-## 📊 Interactive Operational Dashboard
-
-Visualize operational health through:
-
-- Workflow Timeline
-- Department Performance
-- Delay Distribution
-- Employee Workload
-- Efficiency Score
-- Operational Heatmaps
-
----
-
-## 🔮 What-if Simulator
-
-Test operational improvements before implementation.
-
-Examples:
-
-- Add one Finance reviewer
-- Increase warehouse staff
-- Reduce approval levels
-- Increase daily workload
-
-FlowLens AI predicts the impact on efficiency before changes are made.
-
----
-
-## 📄 Professional PDF Reports
-
-Generate detailed operational reports including:
-
-- Workflow Summary
-- AI Insights
-- Root Cause Analysis
-- Recommendations
-- Department Performance
-- Operational Risk Score
-
----
-
-## 📈 Historical Analysis
-
-Track workflow performance over time and compare operational improvements across multiple workflow analyses.
-
----
-
-# 🛠 Technology Stack
-
-<details>
-<summary><b>Click to expand architecture details</b></summary>
-
-### Frontend
-
-- React 19
-- Vite 7
-- Tailwind CSS
-- React Router
-- Axios
-- Recharts
-- Framer Motion
-- React Dropzone
-- Lucide React
-
----
-
-### Backend
-
-- Python 3.11
-- FastAPI
-- Uvicorn
-- Pandas
-- NumPy
-- SQLAlchemy
-- Pydantic
-
----
-
-### Database
-
-- PostgreSQL
-- Supabase
-
----
-
-### AI Engine
-
-- Google Gemini 2.5 Flash
-- Prompt Engineering
-- Operational Pattern Analysis
-- Root Cause Analysis
-- Recommendation Generation
-
----
-
-### Report Generation
-
-- ReportLab
-- OpenPyXL
-- CSV Processing
-
----
-
-### Deployment
-
-Frontend
-
-- Vercel
-
-Backend
-
-- Render
-
-Database
-
-- Supabase
-
-</details>
-
----
-
-<div align="center">
-
-### **Detect • Explain • Predict • Optimize**
-
-**FlowLens AI — Transforming Workflow Data into Operational Intelligence**
-
-</div>
+Settings → Help has a searchable FAQ accordion and a **"Replay tutorial"** button that
+re-runs the 5-step first-time walkthrough (upload → analyze → read report → download
+PDF → connect Sheets).
