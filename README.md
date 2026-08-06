@@ -37,7 +37,6 @@ bottleneck-detector/
 ├── backend/         # Express API + SQLite + bottleneck engine
 ├── frontend/         # React app (Vite)
 ├── samples/           # Example CSV to try the app with
-└── DEPLOYMENT.md      # Step-by-step deploy guide (Render/Railway + Vercel/Netlify)
 ```
 
 ## Quick start (local)
